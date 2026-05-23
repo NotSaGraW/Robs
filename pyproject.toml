@@ -1,0 +1,15 @@
+[project]
+name = "robo"
+version = "0.1.0"
+description = "A new Python project scaffold."
+readme = "README.md"
+authors = [ { name = "Your Name" } ]
+license = { text = "MIT" }
+requires-python = ">=3.11"
+
+[project.urls]
+homepage = "https://example.com"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
