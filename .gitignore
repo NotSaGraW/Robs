@@ -10,5 +10,5 @@ build/
 dist/
 *.egg-info/
 .pytest_cache/
-experiments/logs/
+simulation_tests/logs/
 *.ttt.bak

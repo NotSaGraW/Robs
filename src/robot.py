@@ -1,37 +1,53 @@
 """
 robot.py
-Clase Robot para Pioneer P3DX en CoppeliaSim vía ZMQ Remote API.
-<<<<<<< HEAD
+Robot class for Pioneer P3DX in CoppeliaSim via ZMQ Remote API.
+Encapsulates handles, motors, sensors and control.
 
-Mejora clave respecto a versión anterior:
-  Los sensores ultrasónicos se configuran con una colección de detección
-  (igual que el script Lua del Pioneer) para que funcionen desde Python.
-=======
-Encapsula handles, motores, sensores y control.
->>>>>>> 5f2f97eed1f565038878880bd489cd56631980e4
+Perception system:
+  Two reading modes using sim.checkProximitySensorEx — the sensor hardware
+  never changes, only the detection threshold of each query:
+
+  NORMAL   (0.5m) — exploration, wall following, standard navigation
+  EXTENDED (1.0m) — repositioning, open-space detection, phase transitions
+
+  Active sensor groups depend on movement direction:
+  FORWARD  — frontal sensors [0-7]
+  BACKWARD — rear sensors [8-15]
+  ALL      — all 16 sensors
+  CONTACT  — near-frontal sensors [3,4] only (push confirmation)
 """
 
 import math
 
 
 class Robot:
-    # Geometría física del Pioneer P3DX
-<<<<<<< HEAD
-    WIDTH        = 0.415    # metros
-    LENGTH       = 0.519    # metros
-    HALF_LENGTH  = 0.260    # metros
+    # Pioneer P3DX physical geometry
+    WIDTH       = 0.415
+    LENGTH      = 0.519
+    HALF_LENGTH = 0.260
 
     # Control
-    MAX_SPEED    = 5.0      # rad/s
+    MAX_SPEED    = 5.0
     ANGULAR_GAIN = 2.2
     ANGULAR_LIMIT= 1.5
-    DEAD_ANGLE   = 0.9      # rad
-    ARRIVAL_THR  = 0.15     # metros
+    DEAD_ANGLE   = 0.9
+    ARRIVAL_THR  = 0.15
 
-    # Sensores — índices frontales del Pioneer P3DX
-    # Sensores 3,4,5 (índices 2,3,4) son los más frontales
-    FRONT_SENSORS = [2, 3, 4]
-    CONTACT_DIST  = 0.35    # metros — robot tocando la caja
+    # Perception ranges
+    RANGE_NORMAL   = 0.5   # standard navigation
+    RANGE_EXTENDED = 1.0   # repositioning, open space, phase transitions
+
+    # Contact threshold — robot touching payload
+    CONTACT_DIST = 0.30
+
+    # Sensor index groups
+    SENSORS_FORWARD  = list(range(8))        # [0-7]  frontal
+    SENSORS_BACKWARD = list(range(8, 16))    # [8-15] rear
+    SENSORS_ALL      = list(range(16))       # all 16
+    SENSORS_CONTACT  = [3, 4]                # near-frontal only
+
+    # Detection mode: front+back face detection
+    _DETECT_MODE = 3
 
     def __init__(self, sim, base_path: str, name: str):
         self.sim       = sim
@@ -42,21 +58,17 @@ class Robot:
         self.left_motor  = sim.getObject(f'{base_path}/leftMotor')
         self.right_motor = sim.getObject(f'{base_path}/rightMotor')
 
-        # Configurar sensores con colección de detección
-        # (replica exactamente lo que hace el Lua del Pioneer)
         self.sensors = []
         self._setup_sensors()
 
     # ------------------------------------------------------------------
-    # Configuración de sensores (clave del rediseño)
+    # Sensor setup
     # ------------------------------------------------------------------
 
     def _setup_sensors(self):
         """
-        Obtiene los handles de los 16 sensores ultrasónicos.
-        La colección de detección ya está configurada en el Lua del Pioneer.
-        No modificamos la configuración desde Python para evitar crashes
-        en CoppeliaSim v4.10 con createCollection vía API externa.
+        Gets handles for the 16 ultrasonic sensors.
+        Detection collection is already configured in Pioneer Lua script.
         """
         for i in range(16):
             try:
@@ -67,65 +79,22 @@ class Robot:
                 self.sensors.append(h)
             except Exception:
                 pass
-=======
-    WIDTH = 0.415       # metros, distancia entre ruedas
-    LENGTH = 0.519      # metros, largo del chasis
-    WHEEL_RADIUS = 0.0975  # metros
-
-    # Parámetros de control
-    MAX_SPEED = 3.0         # rad/s máximo en motores
-    PUSH_SPEED = 0.8        # rad/s durante empuje (lento y controlado)
-    APPROACH_SPEED = 2.0    # rad/s durante aproximación
-    ANGULAR_GAIN = 2.2
-    ANGULAR_LIMIT = 1.5
-    DEAD_ANGLE = 0.9        # rad — zona muerta angular (no avanza si gira mucho)
-    ARRIVAL_THRESHOLD = 0.12  # metros — se considera en posición
-
-    def __init__(self, sim, base_path: str, name: str):
-        self.sim = sim
-        self.name = name
-        self.base_path = base_path
-
-        # Handles principales
-        self.handle = sim.getObject(base_path)
-        self.left_motor = sim.getObject(f"{base_path}/leftMotor")
-        self.right_motor = sim.getObject(f"{base_path}/rightMotor")
-
-        # Sensores ultrasónicos (16)
-        self.sensors = []
-        for i in range(16):
-            try:
-                h = sim.getObject(f"{base_path}/ultrasonicSensor", {"index": i})
-                self.sensors.append(h)
-            except Exception:
-                pass  # Si alguno falla, continúa sin él
->>>>>>> 5f2f97eed1f565038878880bd489cd56631980e4
 
     # ------------------------------------------------------------------
-    # Estado
+    # State
     # ------------------------------------------------------------------
 
     def get_position(self) -> list:
-<<<<<<< HEAD
-        return self.sim.getObjectPosition(self.handle, -1)
-
-    def get_yaw(self) -> float:
-        return self.sim.getObjectOrientation(self.handle, -1)[2]
-=======
-        """Posición [x, y, z] en coordenadas mundo."""
         return self.sim.getObjectPosition(self.handle, -1)
 
     def get_orientation(self) -> list:
-        """Orientación [alpha, beta, gamma] en radianes."""
         return self.sim.getObjectOrientation(self.handle, -1)
 
     def get_yaw(self) -> float:
-        """Ángulo yaw (rotación en Z) en radianes."""
-        return self.get_orientation()[2]
->>>>>>> 5f2f97eed1f565038878880bd489cd56631980e4
+        return self.sim.getObjectOrientation(self.handle, -1)[2]
 
     # ------------------------------------------------------------------
-    # Actuación
+    # Actuation
     # ------------------------------------------------------------------
 
     def set_velocity(self, left: float, right: float):
@@ -136,30 +105,19 @@ class Robot:
         self.set_velocity(0.0, 0.0)
 
     # ------------------------------------------------------------------
-<<<<<<< HEAD
-    # Control navegación
+    # Navigation control
     # ------------------------------------------------------------------
 
     def compute_control(self, goal: list, max_speed: float = None) -> tuple:
-=======
-    # Control
-    # ------------------------------------------------------------------
-
-    def compute_control(self, goal: list, max_speed: float = None) -> tuple:
-        """
-        Controlador proporcional unicycle → velocidades ruedas.
-        Retorna (vLeft, vRight).
-        """
->>>>>>> 5f2f97eed1f565038878880bd489cd56631980e4
+        """Proportional unicycle controller → wheel velocities."""
         if max_speed is None:
             max_speed = self.MAX_SPEED
 
         pos = self.get_position()
         yaw = self.get_yaw()
 
-        dx = goal[0] - pos[0]
-        dy = goal[1] - pos[1]
-<<<<<<< HEAD
+        dx   = goal[0] - pos[0]
+        dy   = goal[1] - pos[1]
         dist = math.sqrt(dx*dx + dy*dy)
 
         if dist < self.ARRIVAL_THR:
@@ -185,68 +143,75 @@ class Robot:
         return left, right
 
     def drive_to(self, goal: list, max_speed: float = None):
-=======
-        distance = math.sqrt(dx * dx + dy * dy)
-
-        # Ya estamos en posición
-        if distance < self.ARRIVAL_THRESHOLD:
-            return 0.0, 0.0
-
-        desired_angle = math.atan2(dy, dx)
-        error = math.atan2(
-            math.sin(desired_angle - yaw),
-            math.cos(desired_angle - yaw)
-        )
-
-        # Control angular amortiguado
-        w = self.ANGULAR_GAIN * error
-        w = max(-self.ANGULAR_LIMIT, min(self.ANGULAR_LIMIT, w))
-
-        # Velocidad lineal condicionada al error angular
-        if abs(error) > self.DEAD_ANGLE:
-            v = 0.0  # Gira en sitio si el error es grande
-        else:
-            # Rampa suave: más rápido cuando está alineado y lejos
-            v = 0.15 + (max_speed - 0.15) * (1.0 - abs(error) / self.DEAD_ANGLE)
-            v *= (1.0 - math.exp(-2.0 * distance))  # Suaviza arranque
-
-        left = max(-max_speed, min(max_speed, v - w))
-        right = max(-max_speed, min(max_speed, v + w))
-
-        return left, right
-
-    def drive_to(self, goal: list, max_speed: float = None):
-        """Calcula control y aplica velocidades en un paso."""
->>>>>>> 5f2f97eed1f565038878880bd489cd56631980e4
         vl, vr = self.compute_control(goal, max_speed)
         self.set_velocity(vl, vr)
         return vl, vr
 
     def is_at(self, goal: list, threshold: float = None) -> bool:
-<<<<<<< HEAD
         if threshold is None:
             threshold = self.ARRIVAL_THR
         pos = self.get_position()
         dx  = goal[0] - pos[0]
         dy  = goal[1] - pos[1]
         return (dx*dx + dy*dy) < threshold*threshold
-=======
-        """True si el robot está dentro del umbral de la posición goal."""
-        if threshold is None:
-            threshold = self.ARRIVAL_THRESHOLD
-        pos = self.get_position()
-        dx = goal[0] - pos[0]
-        dy = goal[1] - pos[1]
-        return (dx * dx + dy * dy) < threshold * threshold
->>>>>>> 5f2f97eed1f565038878880bd489cd56631980e4
 
     # ------------------------------------------------------------------
-    # Sensores
+    # Perception — adaptive sensor reading
+    #
+    # Uses sim.checkProximitySensorEx so the sensor hardware never changes.
+    # The detection threshold is specified per query:
+    #   - NORMAL   (0.5m): standard navigation
+    #   - EXTENDED (1.0m): repositioning, open space, phase transitions
+    #
+    # Active sensors depend on movement direction:
+    #   - FORWARD:  frontal sensors [0-7]
+    #   - BACKWARD: rear sensors    [8-15]
+    #   - ALL:      all 16
+    #   - CONTACT:  near-frontal    [3,4]
     # ------------------------------------------------------------------
 
-    def read_sensors(self) -> list:
-<<<<<<< HEAD
-        """Retorna lista de (detected: bool, distance: float) para 16 sensores."""
+    def read_sensors(self, indices: list = None,
+                     range_m: float = None) -> list:
+        """
+        Read sensors using checkProximitySensorEx.
+
+        indices: list of sensor indices to read (default: SENSORS_FORWARD)
+        range_m: detection threshold in metres (default: RANGE_NORMAL)
+
+        Returns list of (detected: bool, distance: float, sensor_index: int)
+        for each queried sensor.
+        """
+        if indices is None:
+            indices = self.SENSORS_FORWARD
+        if range_m is None:
+            range_m = self.RANGE_NORMAL
+
+        results = []
+        for idx in indices:
+            if idx >= len(self.sensors):
+                results.append((False, float('inf'), idx))
+                continue
+            try:
+                res = self.sim.checkProximitySensorEx(
+                    self.sensors[idx],
+                    self.sim.handle_all,
+                    self._DETECT_MODE,
+                    range_m,
+                    math.pi / 4   # 45° max angle — matches cone aperture
+                )
+                detected = res[0] == 1
+                dist     = res[1] if detected else float('inf')
+                results.append((detected, dist, idx))
+            except Exception:
+                results.append((False, float('inf'), idx))
+        return results
+
+    def read_sensors_legacy(self) -> list:
+        """
+        Legacy read using readProximitySensor (Lua-driven, 0.5m range).
+        Used for Braitenberg and grid map updates — preserves existing behaviour.
+        Returns list of (detected: bool, distance: float) for all 16 sensors.
+        """
         results = []
         for h in self.sensors:
             try:
@@ -254,76 +219,100 @@ class Robot:
                 detected = res[0] > 0
                 dist     = res[1] if detected else float('inf')
                 results.append((detected, dist))
-=======
-        """
-        Lee los 16 sensores ultrasónicos.
-        Retorna lista de (detected: bool, distance: float).
-        """
-        results = []
-        for sensor in self.sensors:
-            try:
-                res = self.sim.readProximitySensor(sensor)
-                detected = res[0] > 0
-                distance = res[1] if detected else float('inf')
-                results.append((detected, distance))
->>>>>>> 5f2f97eed1f565038878880bd489cd56631980e4
             except Exception:
                 results.append((False, float('inf')))
         return results
 
-<<<<<<< HEAD
+    # ------------------------------------------------------------------
+    # Contextual perception queries
+    # ------------------------------------------------------------------
+
+    def obstacle_ahead(self, threshold: float = None) -> bool:
+        """
+        True if any frontal sensor detects something within threshold.
+        Uses NORMAL range by default; pass RANGE_EXTENDED for wider sweep.
+        """
+        if threshold is None:
+            threshold = self.RANGE_NORMAL
+        readings = self.read_sensors(self.SENSORS_FORWARD, threshold)
+        return any(detected for detected, _, _ in readings)
+
+    def obstacle_behind(self, threshold: float = None) -> bool:
+        """True if any rear sensor detects something within threshold."""
+        if threshold is None:
+            threshold = self.RANGE_NORMAL
+        readings = self.read_sensors(self.SENSORS_BACKWARD, threshold)
+        return any(detected for detected, _, _ in readings)
+
+    def area_clear(self) -> bool:
+        """
+        True if no obstacle detected at extended range in any direction.
+        Used before repositioning or phase transitions.
+        """
+        readings = self.read_sensors(self.SENSORS_ALL, self.RANGE_EXTENDED)
+        return not any(detected for detected, _, _ in readings)
+
     def front_contact(self) -> tuple:
         """
-        Retorna (contact: bool, min_dist: float) para los sensores frontales.
-        contact=True si algún sensor frontal detecta algo a < CONTACT_DIST.
+        Returns (contact: bool, min_dist: float).
+        contact=True if near-frontal sensors [3,4] detect something < CONTACT_DIST.
+        Uses minimal threshold — confirms physical contact with payload.
         """
-        readings = self.read_sensors()
+        readings = self.read_sensors(self.SENSORS_CONTACT, self.CONTACT_DIST)
         if not readings:
             return False, float('inf')
 
         min_dist = float('inf')
         contact  = False
-        for idx in self.FRONT_SENSORS:
-            if idx < len(readings):
-                detected, dist = readings[idx]
-                if detected and dist < min_dist:
+        for detected, dist, _ in readings:
+            if detected:
+                if dist < min_dist:
                     min_dist = dist
-                if detected and dist < self.CONTACT_DIST:
-                    contact = True
+                contact = True
 
         return contact, min_dist
 
-    def any_front_obstacle(self, threshold: float = 0.5) -> bool:
-        """True si cualquier sensor frontal detecta algo antes de threshold."""
-        readings = self.read_sensors()
-        for idx in self.FRONT_SENSORS:
-            if idx < len(readings):
-                detected, dist = readings[idx]
-                if detected and dist < threshold:
-                    return True
-        return False
+    def nearest_obstacle(self, indices: list = None,
+                          range_m: float = None) -> tuple:
+        """
+        Returns (detected: bool, distance: float, sensor_index: int)
+        for the nearest detected obstacle in the given sensor group.
+        """
+        if indices is None:
+            indices = self.SENSORS_FORWARD
+        if range_m is None:
+            range_m = self.RANGE_NORMAL
+
+        readings = self.read_sensors(indices, range_m)
+        detected_readings = [(d, i) for det, d, i in readings if det]
+
+        if not detected_readings:
+            return False, float('inf'), -1
+
+        dist, idx = min(detected_readings, key=lambda x: x[0])
+        return True, dist, idx
 
     # ------------------------------------------------------------------
-    # Evasión reactiva — Braitenberg (igual que el Lua del Pioneer)
-    # Pesos extraídos directamente del script Lua oficial del P3DX
+    # Reactive obstacle avoidance — Braitenberg
+    # Weights from the official Pioneer P3DX Lua script.
+    # Uses legacy read (0.5m Lua-driven) for consistent behaviour.
     # ------------------------------------------------------------------
 
     BRAITENBERG_L = [-0.2,-0.4,-0.6,-0.8,-1.0,-1.2,-1.4,-1.6,
                       0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     BRAITENBERG_R = [-1.6,-1.4,-1.2,-1.0,-0.8,-0.6,-0.4,-0.2,
                       0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    BRAITENBERG_V0       = 2.0   # rad/s — velocidad base
-    BRAITENBERG_NO_DETECT= 0.5   # metros — distancia sin detección
-    BRAITENBERG_MAX_DETECT= 0.2  # metros — distancia máxima de detección
+    BRAITENBERG_V0        = 2.0
+    BRAITENBERG_NO_DETECT = 0.5
+    BRAITENBERG_MAX_DETECT= 0.2
 
     def braitenberg(self) -> tuple:
         """
-        Controlador Braitenberg para evasión de obstáculos.
-        Replica exactamente el algoritmo del script Lua del Pioneer P3DX.
-        Retorna (vLeft, vRight) en rad/s.
+        Braitenberg obstacle avoidance.
+        Returns (vLeft, vRight) in rad/s.
         """
-        detect = [0.0] * 16
-        readings = self.read_sensors()
+        detect   = [0.0] * 16
+        readings = self.read_sensors_legacy()
 
         for i, (detected, dist) in enumerate(readings):
             if detected and dist < self.BRAITENBERG_NO_DETECT:
@@ -341,28 +330,6 @@ class Robot:
 
         return v_left, v_right
 
-    def obstacle_ahead(self, threshold: float = 0.45) -> bool:
-        """True si algún sensor frontal (0-7) detecta algo antes de threshold."""
-        readings = self.read_sensors()
-        for i in range(8):
-            if i < len(readings):
-                detected, dist = readings[i]
-                if detected and dist < threshold:
-                    return True
-        return False
-
     def __repr__(self):
         pos = self.get_position()
         return f"Robot({self.name}, pos=({pos[0]:.2f},{pos[1]:.2f}))"
-=======
-    def min_front_distance(self) -> float:
-        """Distancia mínima detectada por los 8 sensores frontales."""
-        readings = self.read_sensors()
-        front = readings[:8]
-        distances = [d for _, d in front]
-        return min(distances) if distances else float('inf')
-
-    def __repr__(self):
-        pos = self.get_position()
-        return f"Robot({self.name}, pos=({pos[0]:.2f}, {pos[1]:.2f}))"
->>>>>>> 5f2f97eed1f565038878880bd489cd56631980e4

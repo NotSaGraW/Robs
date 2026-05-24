@@ -1,15 +1,22 @@
 # Multi-Robot Cooperative System — CoppeliaSim + Python
 
 ## Overview
-Multi-agent cooperative robotics system using two Pioneer P3DX robots and a quadcopter
-to move a box to a target position in an initially unknown environment.
+Multi-agent cooperative robotics system using two Pioneer P3DX robots and a
+quadcopter to move a payload to a rally point in a completely unknown environment.
+The only prior knowledge is the rally point position.
 
 ## Agents
-| Agent  | Type         | Role |
-|--------|--------------|------|
-| `/roba`| Pioneer P3DX | Left sector exploration, pusher A |
-| `/robo`| Pioneer P3DX | Right sector exploration, pusher B |
-| `/qua` | Quadcopter   | Aerial exploration, box detection, corridor surveillance |
+| Agent     | Type         | Role |
+|-----------|--------------|------|
+| `/p3dx_1` | Pioneer P3DX | Exploration, pusher 1 |
+| `/p3dx_2` | Pioneer P3DX | Exploration, pusher 2 |
+| `/drone`  | Quadcopter   | Aerial exploration, payload detection, corridor surveillance, communication hub |
+
+## Scene objects
+| Object          | Description |
+|-----------------|-------------|
+| `/payload`      | Object to transport (20kg, 0.5m cube) |
+| `/rally_point`  | Extraction point — only prior known position |
 
 ## Setup
 1. Create and activate a virtual environment:
@@ -34,17 +41,33 @@ python -m src.main
 
 ## Scene geometry
 - Playfield: 5×5m, usable area ~±2.4m in x and y (external walls excluded)
-- `/roba` start: (-1.75, -1.425), `/robo` start: (-1.75, 1.85)
-- `/box` start: (0, 0), `/target`: (1.5, 0.5)
+- `/p3dx_1` start: (-1.75, -1.425), `/p3dx_2` start: (-1.75, 1.85)
+- `/payload` start: (0, 0) — unknown to agents until detected
+- `/rally_point`: (1.5, 0.5) — known from mission start
 - Required push vector: (1.5, 0.5) normalised ≈ (0.949, 0.316)
-- Optimal push position: opposite side of box from target → direction (-0.949, -0.316)
+
+## Knowledge model
+```
+KNOWN at t=0 (given by mission):
+  - rally_point position  ← sole absolute anchor
+
+UNKNOWN, must be discovered:
+  - environment dimensions
+  - wall positions
+  - payload position
+  - other robot positions (until drone communication)
+  - obstacles
+
+NEVER ASSUMED:
+  - any position not yet confirmed by sensor
+```
 
 ## Project structure
 ```
 src/              → main system code
   main.py         → main loop, state machine, timing, logs
   robot.py        → Robot class (handle, motors, sensors, navigation)
-  drone.py        → Drone class (patrol, box detection, corridor mapping)
+  drone.py        → Drone class (patrol, payload detection, corridor mapping)
   scene.py        → geometry, vectors, success condition
   strategy.py     → multi-agent coordination, phase machine
   grid.py         → shared 2D occupancy map
@@ -53,20 +76,22 @@ experiments/      → experimental verification scripts (CoppeliaSim required)
   logs/           → structured output from each experiment
   results/        → analysis and conclusions from experiments
 docs/             → technical documentation and design decisions
-  project_status.md → design decisions, verified data, known issues, pending experiments
+  PROJECT_STATUS.md → design decisions, verified data, known issues
 ```
 
 ## System phases
-| Phase | Description | Exit condition |
-|-------|-------------|----------------|
-| ORIENTATION | Each robot reads all sensors and identifies free space | 360° scan complete |
-| EXPLORING | Wall following builds shared occupancy map | Box detected by any agent |
-| DETECTING | All agents stop, box position confirmed | Position verified |
-| PLANNING | BFS over map computes safe approach routes | Routes computed for A and B |
-| POSITIONING | A positions first (B idle), then B (A idle) | Both confirmed by sensors [3,4] |
-| PUSHING | Both robots push with sensor-confirmed contact | Box reaches target |
-| SUCCESS | Mission complete | — |
+| Phase      | Description | Exit condition |
+|------------|-------------|----------------|
+| EXPLORING  | Wall following builds shared occupancy map | Payload detected by any agent |
+| CONVERGING | Agents navigate to push positions | Both confirmed by frontal sensors |
+| PUSHING    | Both robots push with sensor-confirmed contact | Payload reaches rally point |
+| SUCCESS    | Mission complete | — |
+
+## Communication architecture
+- **Regular channel — 2Hz heartbeat:** robots → drone (partial map, position, state) / drone → robots (global map, other robot position)
+- **Urgent channel — event-driven:** robot detects unknown object → drone identifies (KNOWN_AGENT / KNOWN_OBJECT / KNOWN_STATIC / UNKNOWN)
+- Drone acts as data hub: elevated position avoids interference, has global view
 
 ## Current status
-See `docs/project_status.md` for verified hardware data, design decisions,
+See `docs/PROJECT_STATUS.md` for verified hardware data, design decisions,
 known issues and pending experiments.
