@@ -1,10 +1,14 @@
 """
 robot.py
 Clase Robot para Pioneer P3DX en CoppeliaSim vía ZMQ Remote API.
+<<<<<<< HEAD
 
 Mejora clave respecto a versión anterior:
   Los sensores ultrasónicos se configuran con una colección de detección
   (igual que el script Lua del Pioneer) para que funcionen desde Python.
+=======
+Encapsula handles, motores, sensores y control.
+>>>>>>> 5f2f97eed1f565038878880bd489cd56631980e4
 """
 
 import math
@@ -12,6 +16,7 @@ import math
 
 class Robot:
     # Geometría física del Pioneer P3DX
+<<<<<<< HEAD
     WIDTH        = 0.415    # metros
     LENGTH       = 0.519    # metros
     HALF_LENGTH  = 0.260    # metros
@@ -62,16 +67,62 @@ class Robot:
                 self.sensors.append(h)
             except Exception:
                 pass
+=======
+    WIDTH = 0.415       # metros, distancia entre ruedas
+    LENGTH = 0.519      # metros, largo del chasis
+    WHEEL_RADIUS = 0.0975  # metros
+
+    # Parámetros de control
+    MAX_SPEED = 3.0         # rad/s máximo en motores
+    PUSH_SPEED = 0.8        # rad/s durante empuje (lento y controlado)
+    APPROACH_SPEED = 2.0    # rad/s durante aproximación
+    ANGULAR_GAIN = 2.2
+    ANGULAR_LIMIT = 1.5
+    DEAD_ANGLE = 0.9        # rad — zona muerta angular (no avanza si gira mucho)
+    ARRIVAL_THRESHOLD = 0.12  # metros — se considera en posición
+
+    def __init__(self, sim, base_path: str, name: str):
+        self.sim = sim
+        self.name = name
+        self.base_path = base_path
+
+        # Handles principales
+        self.handle = sim.getObject(base_path)
+        self.left_motor = sim.getObject(f"{base_path}/leftMotor")
+        self.right_motor = sim.getObject(f"{base_path}/rightMotor")
+
+        # Sensores ultrasónicos (16)
+        self.sensors = []
+        for i in range(16):
+            try:
+                h = sim.getObject(f"{base_path}/ultrasonicSensor", {"index": i})
+                self.sensors.append(h)
+            except Exception:
+                pass  # Si alguno falla, continúa sin él
+>>>>>>> 5f2f97eed1f565038878880bd489cd56631980e4
 
     # ------------------------------------------------------------------
     # Estado
     # ------------------------------------------------------------------
 
     def get_position(self) -> list:
+<<<<<<< HEAD
         return self.sim.getObjectPosition(self.handle, -1)
 
     def get_yaw(self) -> float:
         return self.sim.getObjectOrientation(self.handle, -1)[2]
+=======
+        """Posición [x, y, z] en coordenadas mundo."""
+        return self.sim.getObjectPosition(self.handle, -1)
+
+    def get_orientation(self) -> list:
+        """Orientación [alpha, beta, gamma] en radianes."""
+        return self.sim.getObjectOrientation(self.handle, -1)
+
+    def get_yaw(self) -> float:
+        """Ángulo yaw (rotación en Z) en radianes."""
+        return self.get_orientation()[2]
+>>>>>>> 5f2f97eed1f565038878880bd489cd56631980e4
 
     # ------------------------------------------------------------------
     # Actuación
@@ -85,10 +136,21 @@ class Robot:
         self.set_velocity(0.0, 0.0)
 
     # ------------------------------------------------------------------
+<<<<<<< HEAD
     # Control navegación
     # ------------------------------------------------------------------
 
     def compute_control(self, goal: list, max_speed: float = None) -> tuple:
+=======
+    # Control
+    # ------------------------------------------------------------------
+
+    def compute_control(self, goal: list, max_speed: float = None) -> tuple:
+        """
+        Controlador proporcional unicycle → velocidades ruedas.
+        Retorna (vLeft, vRight).
+        """
+>>>>>>> 5f2f97eed1f565038878880bd489cd56631980e4
         if max_speed is None:
             max_speed = self.MAX_SPEED
 
@@ -97,6 +159,7 @@ class Robot:
 
         dx = goal[0] - pos[0]
         dy = goal[1] - pos[1]
+<<<<<<< HEAD
         dist = math.sqrt(dx*dx + dy*dy)
 
         if dist < self.ARRIVAL_THR:
@@ -122,23 +185,67 @@ class Robot:
         return left, right
 
     def drive_to(self, goal: list, max_speed: float = None):
+=======
+        distance = math.sqrt(dx * dx + dy * dy)
+
+        # Ya estamos en posición
+        if distance < self.ARRIVAL_THRESHOLD:
+            return 0.0, 0.0
+
+        desired_angle = math.atan2(dy, dx)
+        error = math.atan2(
+            math.sin(desired_angle - yaw),
+            math.cos(desired_angle - yaw)
+        )
+
+        # Control angular amortiguado
+        w = self.ANGULAR_GAIN * error
+        w = max(-self.ANGULAR_LIMIT, min(self.ANGULAR_LIMIT, w))
+
+        # Velocidad lineal condicionada al error angular
+        if abs(error) > self.DEAD_ANGLE:
+            v = 0.0  # Gira en sitio si el error es grande
+        else:
+            # Rampa suave: más rápido cuando está alineado y lejos
+            v = 0.15 + (max_speed - 0.15) * (1.0 - abs(error) / self.DEAD_ANGLE)
+            v *= (1.0 - math.exp(-2.0 * distance))  # Suaviza arranque
+
+        left = max(-max_speed, min(max_speed, v - w))
+        right = max(-max_speed, min(max_speed, v + w))
+
+        return left, right
+
+    def drive_to(self, goal: list, max_speed: float = None):
+        """Calcula control y aplica velocidades en un paso."""
+>>>>>>> 5f2f97eed1f565038878880bd489cd56631980e4
         vl, vr = self.compute_control(goal, max_speed)
         self.set_velocity(vl, vr)
         return vl, vr
 
     def is_at(self, goal: list, threshold: float = None) -> bool:
+<<<<<<< HEAD
         if threshold is None:
             threshold = self.ARRIVAL_THR
         pos = self.get_position()
         dx  = goal[0] - pos[0]
         dy  = goal[1] - pos[1]
         return (dx*dx + dy*dy) < threshold*threshold
+=======
+        """True si el robot está dentro del umbral de la posición goal."""
+        if threshold is None:
+            threshold = self.ARRIVAL_THRESHOLD
+        pos = self.get_position()
+        dx = goal[0] - pos[0]
+        dy = goal[1] - pos[1]
+        return (dx * dx + dy * dy) < threshold * threshold
+>>>>>>> 5f2f97eed1f565038878880bd489cd56631980e4
 
     # ------------------------------------------------------------------
     # Sensores
     # ------------------------------------------------------------------
 
     def read_sensors(self) -> list:
+<<<<<<< HEAD
         """Retorna lista de (detected: bool, distance: float) para 16 sensores."""
         results = []
         for h in self.sensors:
@@ -147,10 +254,24 @@ class Robot:
                 detected = res[0] > 0
                 dist     = res[1] if detected else float('inf')
                 results.append((detected, dist))
+=======
+        """
+        Lee los 16 sensores ultrasónicos.
+        Retorna lista de (detected: bool, distance: float).
+        """
+        results = []
+        for sensor in self.sensors:
+            try:
+                res = self.sim.readProximitySensor(sensor)
+                detected = res[0] > 0
+                distance = res[1] if detected else float('inf')
+                results.append((detected, distance))
+>>>>>>> 5f2f97eed1f565038878880bd489cd56631980e4
             except Exception:
                 results.append((False, float('inf')))
         return results
 
+<<<<<<< HEAD
     def front_contact(self) -> tuple:
         """
         Retorna (contact: bool, min_dist: float) para los sensores frontales.
@@ -233,3 +354,15 @@ class Robot:
     def __repr__(self):
         pos = self.get_position()
         return f"Robot({self.name}, pos=({pos[0]:.2f},{pos[1]:.2f}))"
+=======
+    def min_front_distance(self) -> float:
+        """Distancia mínima detectada por los 8 sensores frontales."""
+        readings = self.read_sensors()
+        front = readings[:8]
+        distances = [d for _, d in front]
+        return min(distances) if distances else float('inf')
+
+    def __repr__(self):
+        pos = self.get_position()
+        return f"Robot({self.name}, pos=({pos[0]:.2f}, {pos[1]:.2f}))"
+>>>>>>> 5f2f97eed1f565038878880bd489cd56631980e4
