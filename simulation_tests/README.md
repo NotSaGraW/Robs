@@ -1,97 +1,53 @@
-# Multi-Robot Cooperative System — CoppeliaSim + Python
+# Simulation Tests
 
-## Overview
-Multi-agent cooperative robotics system using two Pioneer P3DX robots and a
-quadcopter to move a payload to a rally point in a completely unknown environment.
-The only prior knowledge is the rally point position.
+Verification scripts that require CoppeliaSim running with the scene loaded.
+These are not automated unit tests — they require the simulated hardware
+and produce logs and result files for analysis.
 
-## Agents
-| Agent     | Type         | Role |
-|-----------|--------------|------|
-| `/p3dx_1` | Pioneer P3DX | Exploration, pusher 1 |
-| `/p3dx_2` | Pioneer P3DX | Exploration, pusher 2 |
-| `/drone`  | Quadcopter   | Aerial exploration, payload detection, corridor surveillance, communication hub |
-
-## Scene objects
-| Object          | Description |
-|-----------------|-------------|
-| `/payload`      | Object to transport (20kg, 0.5m cube) |
-| `/rally_point`  | Extraction point — only prior known position |
-
-## Setup
-1. Create and activate a virtual environment:
+## How to run
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-```
-2. Install dependencies:
-```powershell
-python -m pip install -U pip
-python -m pip install -e .
-pip install coppeliasim-zmqremoteapi-client numpy Pillow
-```
-3. Run unit tests:
-```powershell
-python -m pytest
-```
-4. Run full system (CoppeliaSim must be open with scene loaded):
-```powershell
-python -m src.main
+# From project root, with CoppeliaSim open and scene loaded
+python -m simulation_tests.test_sensor_360
 ```
 
-## Scene geometry
-- Playfield: 5×5m, usable area ~±2.4m in x and y (external walls excluded)
-- `/p3dx_1` start: (-1.75, -1.425), `/p3dx_2` start: (-1.75, 1.85)
-- `/payload` start: (0, 0) — unknown to agents until detected
-- `/rally_point`: (1.5, 0.5) — known from mission start
-- Required push vector: (1.5, 0.5) normalised ≈ (0.949, 0.316)
+Logs are saved to `simulation_tests/logs/` with a timestamp.
+Results and conclusions are saved to `simulation_tests/results/`.
 
-## Knowledge model
-```
-KNOWN at t=0 (given by mission):
-  - rally_point position  ← sole absolute anchor
+## Status
 
-UNKNOWN, must be discovered:
-  - environment dimensions
-  - wall positions
-  - payload position
-  - other robot positions (until drone communication)
-  - obstacles
+### Completed
+| Script | Date | Result |
+|--------|------|--------|
+| `test_drone_sensor.py` | 2026-05 | No sensors confirmed |
+| `test_exploring.py` | 2026-05 | Outer waypoints OK, inner waypoints oscillate |
+| `test_wall_follower.py` | 2026-05 | PID works but requires wall in range at start |
 
-NEVER ASSUMED:
-  - any position not yet confirmed by sensor
-```
+### Blocking
+| Script | Status | Purpose |
+|--------|--------|---------|
+| `test_sensor_360.py` | **PENDING — metric fix needed** | Verify position calculation formula with corrected metric (`distance_to_nearest_plane`) |
 
-## Project structure
-```
-src/              → main system code
-  main.py         → main loop, state machine, timing, logs
-  robot.py        → Robot class (handle, motors, sensors, navigation)
-  drone.py        → Drone class (patrol, payload detection, corridor mapping)
-  scene.py        → geometry, vectors, success condition
-  strategy.py     → multi-agent coordination, phase machine
-  grid.py         → shared 2D occupancy map
-tests/            → automated unit tests (pytest, no CoppeliaSim required)
-experiments/      → experimental verification scripts (CoppeliaSim required)
-  logs/           → structured output from each experiment
-  results/        → analysis and conclusions from experiments
-docs/             → technical documentation and design decisions
-  PROJECT_STATUS.md → design decisions, verified data, known issues
-```
+### Priority 1 — Sensor verification
+| Script | Status | Purpose |
+|--------|--------|---------|
+| `test_handle_mapping.py` | PENDING | Verify all object handles with new nomenclature |
+| `test_sensor_identification.py` | PENDING | Verify `readProximitySensor` returns detected object handle |
 
-## System phases
-| Phase      | Description | Exit condition |
-|------------|-------------|----------------|
-| EXPLORING  | Wall following builds shared occupancy map | Payload detected by any agent |
-| CONVERGING | Agents navigate to push positions | Both confirmed by frontal sensors |
-| PUSHING    | Both robots push with sensor-confirmed contact | Payload reaches rally point |
-| SUCCESS    | Mission complete | — |
+### Priority 2 — Movement verification
+| Script | Status | Purpose |
+|--------|--------|---------|
+| `test_wall_approach.py` | PENDING | Robot advances until wall detected from open space |
+| `test_wall_following_pid.py` | PENDING | Full wall following 60s with PID log |
+| `test_motor_response.py` | PENDING | Real robot velocity vs `setJointTargetVelocity` value |
 
-## Communication architecture
-- **Regular channel — 2Hz heartbeat:** robots → drone (partial map, position, state) / drone → robots (global map, other robot position)
-- **Urgent channel — event-driven:** robot detects unknown object → drone identifies (KNOWN_AGENT / KNOWN_OBJECT / KNOWN_STATIC / UNKNOWN)
-- Drone acts as data hub: elevated position avoids interference, has global view
+### Priority 3 — Push verification
+| Script | Status | Purpose |
+|--------|--------|---------|
+| `test_push_single.py` | PENDING | Single robot pushes payload |
+| `test_push_alignment.py` | PENDING | Two robots, different offsets — optimal push geometry |
 
-## Current status
-See `docs/PROJECT_STATUS.md` for verified hardware data, design decisions,
-known issues and pending experiments.
+### Priority 4 — Multi-agent
+| Script | Status | Purpose |
+|--------|--------|---------|
+| `test_deadlock_prevention.py` | PENDING | Two robots face to face — priority hierarchy |
+| `test_exploring_coordination.py` | PENDING | Coordinated exploration with shared map |
