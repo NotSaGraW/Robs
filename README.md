@@ -61,7 +61,7 @@ simulation_tests/
   test_planner.py          — two-robot cooperative push (ACTIVE development)
   test_planner_diag.py     — causal diagnostic: 3 scenarios, CSV logs per step
   test_planner_benchmark.py — multi-scenario replicability sweep
-  test_single_push.py      — single-robot baseline (v7, reference)
+  test_single_push.py      — single-robot baseline (reference)
   test_sensor_360.py       — sensor position formula verification (PASS)
   test_handle_mapping.py   — object handle confirmation (PASS)
   logs/                    — CSV outputs from diagnostic and benchmark runs
@@ -91,7 +91,7 @@ Push direction per face: dynamic (approach → payload centre), not fixed cardin
 
 | Test | Steps | Stall resets | Notes |
 |------|-------|-------------|-------|
-| Single robot (v7) | 826 | 0 | Baseline reference |
+| Single robot push | 826 | 0 | Baseline reference |
 | Two robots, cardinal N+E | 4987 | 0 | First cooperative success |
 | Two robots, 8-dir NE+SE | **1466** | 0 | **Current best** |
 
@@ -110,7 +110,7 @@ Both robots now receive their own d3/d4 sensor observations (centering correctio
   must travel ~3 m to reach the NW approach. Three compounding bugs caused timeout:
   unconditional `wp_idx` reset on every replan, stall detection gated on
   `both_pushing`, and NAV_WEIGHT too low to penalise long routes.
-  All three fixed in planner v2 / diag v2 (2026-05).
+  All three fixed (2026-05).
 - **No environment exploration**: payload and environment are known via
   `getObjectPosition` GT. The exploration/detection phase from `src/main.py`
   is not integrated with the planner.
@@ -122,3 +122,17 @@ Both robots now receive their own d3/d4 sensor observations (centering correctio
 3. Rally-frame dynamic basis: compute approach directions as ±45° from F_des
    to maintain f0≈f1 balance throughout the trajectory.
 4. Integration with `src/main.py` exploration pipeline.
+
+## References
+
+- **CoppeliaSim** — robot simulator used for all development and testing.
+  https://www.coppeliarobotics.com
+
+- **CoppeliaSim manual** — API reference, scene scripting, and sensor documentation.
+  https://manual.coppeliarobotics.com
+
+- **CoppeliaSim ZMQ Remote API** — official Python client library (`coppeliasim-zmqremoteapi-client`) used to control the simulation from Python.
+  https://github.com/CoppeliaRobotics/zmqRemoteApi
+
+- **coppeliasim-projects-with-zmqRemoteApi** (yudarw) — practical examples of ZMQ Remote API usage that informed the robot control interface.
+  https://github.com/yudarw/coppeliasim-projects-with-zmqRemoteApi

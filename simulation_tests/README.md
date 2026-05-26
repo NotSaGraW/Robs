@@ -20,8 +20,8 @@ python -m simulation_tests.test_planner_benchmark
 |--------|------|--------|
 | `test_sensor_360.py` | 2026-05 | PASS — position formula verified, avg error 0.025 m |
 | `test_handle_mapping.py` | 2026-05 | PASS — all object handles confirmed |
-| `test_single_push.py` (v7) | 2026-05 | PASS — 826 steps, 0.3293 m, deterministic |
-| `test_planner.py` (v3) | 2026-05 | PASS — 1466 steps, NE+SE faces, 0 stall resets |
+| `test_single_push.py` | 2026-05 | PASS — 826 steps, 0.3293 m, deterministic |
+| `test_planner.py` | 2026-05 | PASS — 1466 steps, NE+SE faces, 0 stall resets |
 | `test_exploring.py` | 2026-05 | Partial — outer waypoints OK, inner waypoints oscillate |
 | `test_wall_follower.py` | 2026-05 | Partial — PID OK, requires wall in range at start |
 
@@ -48,7 +48,7 @@ python -m simulation_tests.test_planner_benchmark
 
 ## Key results summary
 
-### Single robot (v7) — `test_single_push.py`
+### Single robot push — `test_single_push.py`
 Best reference for single-agent performance.
 - **826 steps**, 0 repositions, final dist 0.3293 m
 - Deterministic across multiple runs from same start position (-1.725, -1.475)
@@ -68,7 +68,7 @@ NE+SE 8-dir    1466    0.50    Current best; 3.4× faster than N+E
 - Approach separation: 0.692 m (no collision)
 - Force residual: 0 (perfect F_des reconstruction)
 
-### Diagnostic findings — `test_planner_diag.py` (v2, 2026-05)
+### Diagnostic findings — `test_planner_diag.py` (2026-05)
 
 Three scenarios run: NE_baseline (SUCCESS), N_north (TIMEOUT), SE_southeast (SUCCESS).
 
@@ -93,9 +93,9 @@ Three scenarios run: NE_baseline (SUCCESS), N_north (TIMEOUT), SE_southeast (SUC
 
 ## Architecture note
 
-`test_planner.py` v3 / `test_planner_diag.py` v2 use:
+`test_planner.py` / `test_planner_diag.py` use:
 - `src/planner.py` — ContactPlanner with 8-direction frames, NNLS, sticky locks
 - `src/robot.py` — Robot class (sensors, motors, drive_to)
 - Unified sensor routing: each robot reads its own d3/d4 independently
 - EMA stall detection (active only when both robots in PUSH)
-- Per-robot NAV timeout (active from diag v2 onwards)
+- Per-robot NAV timeout

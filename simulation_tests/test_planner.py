@@ -1,12 +1,8 @@
 """
-test_planner.py — v3
+test_planner.py
 
 Two-robot cooperative push using force-decomposition ContactPlanner.
 Run: python -m simulation_tests.test_planner
-
-Changes vs v2:
-  - Sensor routing unified: both agents receive their own d3/d4 observation
-  - Planner uses 8-direction contact frames (see planner.py)
 """
 
 import math
@@ -128,7 +124,7 @@ class RobotAgent:
 
 
 def main():
-    print("=== PLANNER-BASED TWO ROBOT PUSH v3 (8-direction frames) ===\n")
+    print("=== PLANNER-BASED TWO ROBOT PUSH ===\n")
 
     client    = RemoteAPIClient()
     sim       = client.getObject('sim')

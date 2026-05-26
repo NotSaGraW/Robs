@@ -79,7 +79,7 @@ def wall_distance_est(distances, sensors):
 
 
 def main():
-    print("=== TEST: Wall-referenced navigation v4 — /p3dx_1 ===\n")
+    print("=== TEST: Wall-referenced navigation — /p3dx_1 ===\n")
 
     client = RemoteAPIClient()
     sim    = client.getObject('sim')

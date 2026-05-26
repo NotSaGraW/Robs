@@ -1,5 +1,5 @@
 """
-test_sensor_calibration.py — v2
+test_sensor_calibration.py
 
 Validates the corrected sensor geometry:
   SENSOR_FORWARD_OFFSET = 0.209m  (sensors [3],[4] are 5.1cm behind robot front)
@@ -69,7 +69,7 @@ def infer_center(rx, ry, yaw, d3, d4,
 
 
 def main():
-    print("=== SENSOR CALIBRATION v2 ===")
+    print("=== SENSOR CALIBRATION ===")
     print(f"SENSOR_FORWARD_OFFSET = {SENSOR_FORWARD_OFFSET}m\n")
 
     client    = RemoteAPIClient()

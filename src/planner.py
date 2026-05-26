@@ -35,13 +35,15 @@ import itertools
 
 
 PAYLOAD_HALF       = 0.25
+ROBOT_HALF_W       = 0.19   # Pioneer P3DX body half-width (0.381m / 2, rounded up)
 PUSH_DIST          = 0.489
-NAV_CLEARANCE      = 0.35
+NAV_CLEARANCE      = PAYLOAD_HALF + ROBOT_HALF_W + 0.01  # Minkowski sum: 0.45 m
 ROBOT_CLEARANCE    = 0.50
 MIN_APPROACH_SEP   = 0.52   # m — min distance between approach positions
                              # Pioneer width=0.415m, +0.10m margin
 
 MIN_FORCE          = 0.05
+SOLO_PENALTY       = 0.20   # added to single-robot scores to prefer cooperation when both are reachable
 
 NAV_WEIGHT         = 0.30   # raised from 0.08 to penalise long approach routes
 NAV_NORM           = 3.0    # typical scene span in metres — normalises nav_cost to [0,1]
@@ -49,6 +51,12 @@ BALANCE_WEIGHT     = 0.20
 PROGRESS_WEIGHT    = 0.50
 TORQUE_WEIGHT      = 0.10
 ALIGNMENT_WEIGHT   = 0.30
+
+# Hysteresis: new assignment must beat current by more than PLAN_EPSILON to switch.
+# lock_bonus (0.2 total) provides a first layer of stickiness.
+# PLAN_EPSILON adds an explicit second layer so that marginal geometry changes
+# (plan_margin < PLAN_EPSILON) never cause a face flip.
+PLAN_EPSILON       = 0.05
 
 _R2 = 0.7071  # 1/sqrt(2)
 PUSH_CONFIGS = {
@@ -218,9 +226,29 @@ def _safe_waypoints(start, end, payload, nav_clr,
         return []
 
     px, py = payload
-    sx, sy = start
-    ex, ey = end
 
+    # Pass 1 — single intermediate waypoint sampled on 8 directions around
+    # the payload at increasing radii.  Pick the shortest valid path so the
+    # robot takes the most direct arc rather than a long L-shaped detour.
+    best_wp   = None
+    best_len  = float('inf')
+    for scale in [1.2, 1.5, 2.0, 3.0]:
+        r = nav_clr * scale
+        for deg in range(0, 360, 45):
+            rad = math.radians(deg)
+            wp = (px + r * math.cos(rad), py + r * math.sin(rad))
+            if seg_ok(start, wp) and seg_ok(wp, end):
+                length = _dist(start, wp) + _dist(wp, end)
+                if length < best_len:
+                    best_len, best_wp = length, wp
+    if best_wp is not None:
+        return [best_wp]
+
+    # Pass 2 — fallback: two-waypoint L-shaped column path.
+    # Reliable when start and end are on the same side of the payload and a
+    # single-waypoint arc cannot clear both segments simultaneously.
+    sy = start[1]
+    ey = end[1]
     if obstacles:
         obs_x_mean = sum(o[0] for o in obstacles) / len(obstacles)
         x_signs = [+1, -1] if obs_x_mean <= px else [-1, +1]
@@ -229,21 +257,10 @@ def _safe_waypoints(start, end, payload, nav_clr,
 
     for x_sign in x_signs:
         for x_offset in [2.5, 3.5, 5.0]:
-            col_x = px + x_sign*nav_clr*x_offset
+            col_x = px + x_sign * nav_clr * x_offset
             wp1, wp2 = (col_x, sy), (col_x, ey)
             if seg_ok(start, wp1) and seg_ok(wp1, wp2) and seg_ok(wp2, end):
                 return [wp1, wp2]
-
-    for scale in [1.5, 2.0, 3.0]:
-        for cx, cy in [
-            (px+x_signs[0]*nav_clr*scale, py-nav_clr*scale),
-            (px+x_signs[0]*nav_clr*scale, py+nav_clr*scale),
-            (px+x_signs[1]*nav_clr*scale, py-nav_clr*scale),
-            (px+x_signs[1]*nav_clr*scale, py+nav_clr*scale),
-        ]:
-            wp = (cx, cy)
-            if seg_ok(start, wp) and seg_ok(wp, end):
-                return [wp]
 
     return []
 
@@ -257,11 +274,16 @@ class ContactPlanner:
     """
 
     def __init__(self):
-        self._locked = {}
+        self._locked          = {}
+        self.last_best_score  = 0.0   # score of the winning assignment (after lock_bonus)
+        self.last_margin      = 0.0   # score gap: 2nd-best minus best (stability proxy)
+        self.last_scores      = []    # [(score, key_r0, key_r1), ...] top-3 feasible
+        self.last_epsilon_held = False  # True when PLAN_EPSILON prevented a face switch
 
-    def reset(self, robot_idx=None):
+    def reset(self, robot_idx=None, keep_locked=False):
         if robot_idx is None:
-            self._locked.clear()
+            if not keep_locked:
+                self._locked.clear()
         else:
             self._locked.pop(robot_idx, None)
 
@@ -275,8 +297,11 @@ class ContactPlanner:
         r0_pos  = robots_pos[0]
         r1_pos  = robots_pos[1]
 
-        best_score  = float('inf')
-        best_assign = None
+        candidates     = []             # (score, key_r0, key_r1) — all feasible
+        best_score     = float('inf')
+        best_assign    = None
+        current_score  = float('inf')   # score of the currently-locked assignment
+        current_assign = None           # result dict for the locked assignment
 
         for k0, k1 in itertools.combinations(all_keys, 2):
             for (key_r0, key_r1) in [(k0, k1), (k1, k0)]:
@@ -287,12 +312,35 @@ class ContactPlanner:
                 if result is None:
                     continue
                 score, nd0, nd1, f0, f1, app0, app1 = result
+                assign = {
+                    0: (key_r0, app0, f0, nd0),
+                    1: (key_r1, app1, f1, nd1),
+                }
+                candidates.append((score, key_r0, key_r1))
                 if score < best_score:
                     best_score  = score
-                    best_assign = {
-                        0: (key_r0, app0, f0, nd0),
-                        1: (key_r1, app1, f1, nd1)
-                    }
+                    best_assign = assign
+                # Track the score of the currently-locked pair (fresh geometry).
+                if key_r0 == lock_r0 and key_r1 == lock_r1:
+                    current_score  = score
+                    current_assign = assign
+
+        candidates.sort(key=lambda c: c[0])
+        self.last_scores     = candidates[:3]
+        self.last_best_score = candidates[0][0] if candidates else 0.0
+        self.last_margin     = (candidates[1][0] - candidates[0][0]
+                                if len(candidates) >= 2 else float('inf'))
+
+        # Epsilon hysteresis: only switch if new winner beats current by > PLAN_EPSILON.
+        # current_score already includes lock_bonus (-0.2), so effective threshold
+        # is lock_bonus + PLAN_EPSILON = 0.25 of raw score advantage needed to flip.
+        if (current_assign is not None
+                and best_score >= current_score - PLAN_EPSILON):
+            best_assign           = current_assign
+            best_score            = current_score
+            self.last_epsilon_held = True
+        else:
+            self.last_epsilon_held = False
 
         if best_assign is None:
             best_key = max(all_keys,

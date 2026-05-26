@@ -1,5 +1,5 @@
 """
-test_push_alignment.py v4
+test_push_alignment.py
 
 Tests full push sequence:
   1. Approach payload
@@ -90,7 +90,7 @@ def contact_metrics(sim, robot):
 
 
 def main():
-    print("=== TEST: Push alignment v4 — approach + align + push ===\n")
+    print("=== TEST: Push alignment — approach + align + push ===\n")
 
     client      = RemoteAPIClient()
     sim         = client.getObject('sim')

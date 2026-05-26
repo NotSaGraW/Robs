@@ -1,5 +1,5 @@
 """
-test_single_push.py — v7
+test_single_push.py
 
 Single-robot push using GT for navigation and position,
 sensors [3],[4] only for lateral centering correction during push.
@@ -114,7 +114,7 @@ def retreat_point(px, py, rpos):
 
 
 def main():
-    print("=== SINGLE PUSH v7 — GT navigation + sensor centering ===\n")
+    print("=== SINGLE PUSH — GT navigation + sensor centering ===\n")
 
     client    = RemoteAPIClient()
     sim       = client.getObject('sim')

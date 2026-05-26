@@ -1,5 +1,5 @@
 """
-test_two_robots.py — v2
+test_two_robots.py
 
 P1: longitudinal pusher (GT direction + sensor centering)
 P2: yaw stabilizer — cancels payload rotation, not a pusher
@@ -8,7 +8,7 @@ P2 control signal: yaw_error between payload movement direction
 and ideal direction (payload→rally). F_p2 ∝ -yaw_error in perp axis.
 
 P2 enters PUSH only with confirmed side contact AND alignment.
-P2 target frozen (like v7) to avoid chasing moving reference.
+P2 target frozen to avoid chasing moving reference.
 PUSH_SPD_P2 = 0.2 (small — canceling rotation, not pushing)
 
 Run:
@@ -183,7 +183,7 @@ def step_p2(robot, px, py, rally_pos, d7, phase,
 
 
 def main():
-    print("=== TWO ROBOT PUSH v2 — P1 longitudinal + P2 yaw stabilizer ===\n")
+    print("=== TWO ROBOT PUSH — P1 longitudinal + P2 yaw stabilizer ===\n")
 
     client    = RemoteAPIClient()
     sim       = client.getObject('sim')
