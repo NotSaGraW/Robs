@@ -1,14 +1,33 @@
 """
-planner.py
-Central contact planner — force decomposition approach.
+planner.py — ContactPlanner
+Central force-decomposition planner for two-robot cooperative push.
 
-Fixes applied:
-  1. 8-direction contact frames (N,S,E,W,NE,NW,SE,SW)
-  2. Minimum approach separation: reject pairs where robots would collide at approach
-  3. Geometric guardrail: reject faces on rally side of payload
-  4. No swap symmetry: both orderings scored explicitly
-  5. Soft alignment, balance, torque, progress penalties
-  6. Sticky assignments for navigation stability
+Algorithm (each planning call):
+  1. Compute F_des = normalise(payload → rally).
+  2. Enumerate all unordered face pairs from 8 directions (N S E W NE NW SE SW).
+  3. For each pair, evaluate both robot-to-face orderings:
+       a. Reject if approach separation < MIN_APPROACH_SEP  (collision avoidance).
+       b. Reject if either approach is on the rally side of the payload
+          (robot would push payload away from goal).
+       c. Solve 2-variable NNLS: min ||f0*n0 + f1*n1 - F_des||²  s.t. f0,f1 ≥ 0.
+       d. Score the assignment (lower is better):
+            score = residual
+                  + PROGRESS_WEIGHT  * progress_penalty   # directional alignment
+                  + ALIGNMENT_WEIGHT * alignment_penalty   # per-robot alignment
+                  + BALANCE_WEIGHT   * balance             # |f0 - f1|
+                  + TORQUE_WEIGHT    * torque              # net rotation proxy
+                  + NAV_WEIGHT       * nav_cost            # normalised travel distance
+                  - lock_bonus                             # sticky assignment reward
+  4. Select minimum-score feasible assignment.
+  5. Generate collision-aware waypoints for each robot via _safe_waypoints.
+  6. Lock assignment (sticky) — only re-scored if face changes or stall reset.
+
+Scoring rationale:
+  NAV_WEIGHT (0.30) is intentionally higher than the original (0.08) to prevent
+  the planner from choosing geometrically optimal but navigationally infeasible
+  assignments where one robot must cross the full scene (~3 m) while the other
+  is already in position.  nav_cost is normalised by NAV_NORM (3.0 m) so the
+  weight stays in the same scale as the other penalty terms.
 """
 
 import math
@@ -24,7 +43,8 @@ MIN_APPROACH_SEP   = 0.52   # m — min distance between approach positions
 
 MIN_FORCE          = 0.05
 
-NAV_WEIGHT         = 0.08
+NAV_WEIGHT         = 0.30   # raised from 0.08 to penalise long approach routes
+NAV_NORM           = 3.0    # typical scene span in metres — normalises nav_cost to [0,1]
 BALANCE_WEIGHT     = 0.20
 PROGRESS_WEIGHT    = 0.50
 TORQUE_WEIGHT      = 0.10
@@ -163,7 +183,7 @@ def _score_assignment(robot0_pos, robot1_pos,
     r1 = (app1[0]-px, app1[1]-py)
     torque = abs(f0*_cross2d(r0, nd0) + f1*_cross2d(r1, nd1))
 
-    nav_cost = _dist(robot0_pos, app0) + _dist(robot1_pos, app1)
+    nav_cost = (_dist(robot0_pos, app0) + _dist(robot1_pos, app1)) / NAV_NORM
 
     lock_bonus = (0.1 if lock_r0 == key_r0 else 0.0) + \
                  (0.1 if lock_r1 == key_r1 else 0.0)

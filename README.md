@@ -52,19 +52,19 @@ Playfield: 5×5 m. Verified handles: p3dx_1=15, p3dx_2=99, payload=98, rally=97.
 
 ```
 src/
-  planner.py   — ContactPlanner: NNLS force decomposition, 8-direction frames
-  robot.py     — Robot class: sensors, motors, drive_to, get_yaw
-  scene.py     — geometry: dist2d, push_vector, payload_reached_rally_point
-  grid.py      — shared 2D occupancy map (50×50, 0.1 m/cell)
+  planner.py    — ContactPlanner: NNLS force decomposition, 8-direction frames
+  robot.py      — Robot class: sensors, motors, drive_to, get_yaw
+  scene.py      — geometry: dist2d, push_vector, payload_reached_rally_point
+  grid.py       — shared 2D occupancy map (50×50, 0.1 m/cell)
 
 simulation_tests/
-  test_planner.py    — two-robot cooperative push (ACTIVE development)
-  test_single_push.py — single-robot baseline (v7, reference)
-  test_sensor_360.py  — sensor position formula verification (PASS)
-  test_handle_mapping.py — object handle confirmation (PASS)
-
-docs/
-  PROJECT_STATUS.md  — architecture decisions, results, pending work
+  test_planner.py          — two-robot cooperative push (ACTIVE development)
+  test_planner_diag.py     — causal diagnostic: 3 scenarios, CSV logs per step
+  test_planner_benchmark.py — multi-scenario replicability sweep
+  test_single_push.py      — single-robot baseline (v7, reference)
+  test_sensor_360.py       — sensor position formula verification (PASS)
+  test_handle_mapping.py   — object handle confirmation (PASS)
+  logs/                    — CSV outputs from diagnostic and benchmark runs
 ```
 
 ## Planner architecture
@@ -105,14 +105,20 @@ Both robots now receive their own d3/d4 sensor observations (centering correctio
 - **Basis degeneracy**: with fixed 8-direction frames, NNLS balance degrades
   as payload moves and angles shift. Rally-frame basis (dynamic ±45° from
   payload→rally vector) would give f0≈f1 throughout. Not yet implemented.
-- **Single test scenario**: all results are for rally at (1.125, 0.225).
-  Different rally positions not yet benchmarked.
+- **Non-replicability across rally directions**: confirmed via `test_planner_diag.py`.
+  For pure-north rally the planner assigns NE+NW (geometrically optimal) but R2
+  must travel ~3 m to reach the NW approach. Three compounding bugs caused timeout:
+  unconditional `wp_idx` reset on every replan, stall detection gated on
+  `both_pushing`, and NAV_WEIGHT too low to penalise long routes.
+  All three fixed in planner v2 / diag v2 (2026-05).
 - **No environment exploration**: payload and environment are known via
   `getObjectPosition` GT. The exploration/detection phase from `src/main.py`
   is not integrated with the planner.
 
 ## Next steps
 
-1. Rally-frame dynamic basis: compute approach directions as ±45° from F_des
-2. Multi-scenario benchmarking: rally N, S, NW
-3. Integration with `src/main.py` exploration pipeline
+1. Re-run `test_planner_diag.py` with fixes to verify N_north now succeeds.
+2. Run `test_planner_benchmark.py` to measure replicability across all rally directions.
+3. Rally-frame dynamic basis: compute approach directions as ±45° from F_des
+   to maintain f0≈f1 balance throughout the trajectory.
+4. Integration with `src/main.py` exploration pipeline.
