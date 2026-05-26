@@ -105,6 +105,60 @@ class Robot:
         self.set_velocity(0.0, 0.0)
 
     # ------------------------------------------------------------------
+    # Action primitives
+    #
+    # High-level discrete actions for reactive navigation.
+    # Speed in rad/s. Default speed covers typical navigation scenarios.
+    #
+    # Usage context:
+    #   move_forward  — exploration, approach, push
+    #   move_backward — micro-corrections, push repositioning, post-turn trim
+    #                   never primary navigation
+    #   turn_left     — obstacle avoidance, wall following transitions
+    #   turn_right    — obstacle avoidance, wall following transitions
+    #   turn_around   — dead end recovery (all sides blocked)
+    # ------------------------------------------------------------------
+
+    DEFAULT_SPEED = 2.0   # rad/s — standard navigation speed
+    TURN_SPEED    = 1.5   # rad/s — controlled turn speed
+
+    def move_forward(self, speed: float = None):
+        """Advance straight forward."""
+        s = speed if speed is not None else self.DEFAULT_SPEED
+        self.set_velocity(s, s)
+
+    def move_backward(self, speed: float = None):
+        """
+        Reverse straight back.
+        Use for micro-corrections and push repositioning only.
+        """
+        s = speed if speed is not None else self.DEFAULT_SPEED
+        self.set_velocity(-s, -s)
+
+    def turn_left(self, speed: float = None):
+        """Spin left on own axis."""
+        s = speed if speed is not None else self.TURN_SPEED
+        self.set_velocity(-s, s)
+
+    def turn_right(self, speed: float = None):
+        """Spin right on own axis."""
+        s = speed if speed is not None else self.TURN_SPEED
+        self.set_velocity(s, -s)
+
+    def turn_around(self, speed: float = None):
+        """
+        Rotate 180° — dead end recovery.
+        Blocks until complete (approximate via time).
+        At TURN_SPEED rad/s, 180° ≈ π/TURN_SPEED seconds.
+        """
+        import time
+        s = speed if speed is not None else self.TURN_SPEED
+        duration = 3.14159 / s
+        self.set_velocity(s, -s)
+        time.sleep(duration)
+        self.stop()
+
+    # ------------------------------------------------------------------
     # Navigation control
     # ------------------------------------------------------------------
 
