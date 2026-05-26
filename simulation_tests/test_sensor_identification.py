@@ -1,144 +1,126 @@
 """
 test_sensor_identification.py
 
-Maps the full sensor layout of /p3dx_1 by spinning the robot slowly
-and recording which sensors activate as it faces known walls.
-
-For each sensor records:
-  - Activation angle (robot yaw when sensor first detects)
-  - Distance at activation
-  - Estimated sensor direction relative to robot forward axis
+Resolves detected object handles by walking up the scene hierarchy.
+Results are cached — first detection traverses parents, subsequent ones are instant.
 
 Usage:
     python -m simulation_tests.test_sensor_identification
-
-Dependencies:
-    pip install coppeliasim-zmqremoteapi-client
-
-Prerequisites:
-    - CoppeliaSim open with scene loaded and simulation NOT running
-    - /p3dx_1 placed in open space away from walls (center of arena)
-      so sensor activations are unambiguous
 """
 
 import time
-import math
-import csv
-import os
-from datetime import datetime
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 from src.robot import Robot
 
 
-LOG_DIR    = 'simulation_tests/logs'
-RESULT_DIR = 'simulation_tests/results'
+ROOT_HANDLES = {
+    15:  'p3dx_1',
+    99:  'p3dx_2',
+    141: 'drone',
+    98:  'payload',
+    13:  'floor',
+    97:  'rally_point',
+}
+
+_parent_cache = {}
+
+
+def resolve_handle(sim, handle):
+    """
+    Resolves a handle to its root agent name by walking up the hierarchy.
+    Results are cached after first resolution.
+    """
+    if handle in ROOT_HANDLES:
+        return ROOT_HANDLES[handle]
+    if handle in _parent_cache:
+        return _parent_cache[handle]
+
+    current = handle
+    visited = [handle]
+    while current != -1:
+        try:
+            parent = sim.getObjectParent(current)
+        except Exception:
+            break
+        if parent in ROOT_HANDLES:
+            name = ROOT_HANDLES[parent]
+            for h in visited:
+                _parent_cache[h] = name
+            return name
+        if parent == -1:
+            break
+        current = parent
+        visited.append(current)
+
+    name = f'unknown(h={handle})'
+    _parent_cache[handle] = name
+    return name
 
 
 def main():
-    print("=== TEST: Sensor identification — full layout mapping ===\n")
+    print("=== TEST: Sensor identification with hierarchy resolution ===\n")
 
     client = RemoteAPIClient()
     sim    = client.getObject('sim')
-
-    os.makedirs(LOG_DIR,    exist_ok=True)
-    os.makedirs(RESULT_DIR, exist_ok=True)
-    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-
-    # Place robot at center for unambiguous readings
-    robot  = Robot(sim, '/p3dx_1', name='1')
     sim.startSimulation()
     time.sleep(0.5)
 
-    print(f"Robot position: {[round(x,3) for x in robot.get_position()[:2]]}")
-    print(f"Robot yaw:      {round(math.degrees(robot.get_yaw()), 1)}°\n")
-    print("Spinning robot 360° slowly, recording sensor activations...\n")
+    robot      = Robot(sim, '/p3dx_1', name='1')
+    target_h   = sim.getObject('/p3dx_2')
+    target_pos = sim.getObjectPosition(target_h, -1)
 
-    # Track first activation per sensor
-    activations  = {}   # sensor_idx → {yaw, dist}
-    all_readings = []
-
-    # Spin slowly for one full rotation
-    spin_speed  = 0.3   # rad/s — slow enough to catch all activations
-    spin_time   = 25.0  # seconds — enough for ~360° at 0.3 rad/s
-    step        = 0.05
-
-    left_motor  = sim.getObject('/p3dx_1/leftMotor')
-    right_motor = sim.getObject('/p3dx_1/rightMotor')
-    sim.setJointTargetVelocity(left_motor,   spin_speed)
-    sim.setJointTargetVelocity(right_motor, -spin_speed)
-
-    print(f"{'S':>3} {'Yaw':>8} {'Dist':>8} {'Dir_from_fwd':>15}")
-    print("-" * 40)
+    print(f"p3dx_1: {[round(x,3) for x in robot.get_position()[:2]]}")
+    print(f"p3dx_2: {[round(x,3) for x in target_pos[:2]]}\n")
+    print(f"{'t':>5} {'S':>3} {'dist':>7} {'object':>20}  {'h_raw':>10}")
+    print("-" * 50)
 
     t_start = time.time()
-    while time.time() - t_start < spin_time:
-        yaw_rad = robot.get_yaw()
-        yaw_deg = math.degrees(yaw_rad)
+    while time.time() - t_start < 20.0:
+
         readings = robot.read_sensors_legacy()
 
-        for i, (detected, dist) in enumerate(readings):
-            if detected and dist < 0.9:
-                # Record first activation only
-                if i not in activations:
-                    activations[i] = {
-                        'yaw_deg': round(yaw_deg, 1),
-                        'dist':    round(dist, 3)
-                    }
-                    print(f"[{i:>2}] {yaw_deg:>7.1f}° {dist:>7.3f}m  first activation")
+        # Speed proportional to nearest frontal obstacle
+        frontal  = [1, 2, 3, 4, 5, 6]
+        dists    = [readings[i][1] for i in frontal
+                    if readings[i][0] and readings[i][1] < 1.0]
+        min_front = min(dists) if dists else 1.0
 
-                all_readings.append({
-                    'time':    round(time.time() - t_start, 2),
-                    'yaw_deg': round(yaw_deg, 1),
-                    'sensor':  i,
-                    'dist':    round(dist, 3)
-                })
+        if min_front < 0.15:
+            robot.stop()
+        elif min_front < 0.40:
+            vl, vr = robot.braitenberg()
+            robot.set_velocity(vl, vr)
+        else:
+            speed = 2.0 * min(1.0, (min_front - 0.15) / 0.35)
+            robot.drive_to(target_pos, speed)
 
-        time.sleep(step)
+        # Identify all detections
+        t = time.time() - t_start
+        any_detected = False
 
-    sim.setJointTargetVelocity(left_motor,  0)
-    sim.setJointTargetVelocity(right_motor, 0)
+        for i, h in enumerate(robot.sensors):
+            try:
+                res = sim.readProximitySensor(h)
+                if res[0] > 0:
+                    any_detected = True
+                    dist       = res[1]
+                    obj_handle = int(res[3])
+                    obj_name   = resolve_handle(sim, obj_handle)
+                    print(f"{t:5.1f} [{i:>2}] {dist:7.3f}m "
+                          f"{obj_name:>20}  h={obj_handle}")
+            except Exception:
+                pass
 
-    # Compute relative angle for each sensor
-    # The sensor that activates at a given yaw points in the direction
-    # the robot was facing when it detected — relative to initial forward
-    print(f"\n{'='*55}")
-    print(f"SENSOR MAP (relative to robot forward axis = 0°)")
-    print(f"{'='*55}")
-    print(f"{'S':>3} {'First_yaw':>10} {'Dist':>8} {'Notes':>20}")
-    print("-" * 55)
+        if not any_detected:
+            pos = robot.get_position()
+            print(f"{t:5.1f} --- nothing  pos=({pos[0]:.2f},{pos[1]:.2f})")
 
-    for i in sorted(activations.keys()):
-        a = activations[i]
-        # Sensors 0-7: frontal half, 8-15: rear half (approximate)
-        half = "frontal" if i < 8 else "rear"
-        print(f"[{i:>2}] {a['yaw_deg']:>9.1f}° {a['dist']:>7.3f}m  {half}")
+        time.sleep(0.05)
 
-    # Save CSV
-    log_path = os.path.join(LOG_DIR, f'sensor_identification_{ts}.csv')
-    with open(log_path, 'w', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=['time','yaw_deg','sensor','dist'])
-        writer.writeheader()
-        writer.writerows(all_readings)
-
-    # Save result
-    result_path = os.path.join(RESULT_DIR, 'test_sensor_identification_result.md')
-    with open(result_path, 'w') as f:
-        f.write(f"# Result: test_sensor_identification.py\n\n")
-        f.write(f"**Date:** {datetime.now().strftime('%Y-%m-%d')}\n\n")
-        f.write(f"## Sensor activation map\n\n")
-        f.write(f"| Sensor | First activation yaw | Distance | Half |\n")
-        f.write(f"|--------|---------------------|----------|------|\n")
-        for i in sorted(activations.keys()):
-            a = activations[i]
-            half = "frontal" if i < 8 else "rear"
-            f.write(f"| [{i}] | {a['yaw_deg']}° | {a['dist']}m | {half} |\n")
-        f.write(f"\n## Log\n`{log_path}`\n")
-
-    print(f"\nResult: {result_path}")
-    print(f"Log:    {log_path}")
-
+    robot.stop()
     sim.stopSimulation()
-    print("Simulation stopped.")
+    print(f"\nCache built: {len(_parent_cache)} handles resolved")
+    print("\nSimulation stopped.")
 
 
 if __name__ == '__main__':

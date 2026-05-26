@@ -11,4 +11,5 @@ dist/
 *.egg-info/
 .pytest_cache/
 simulation_tests/logs/
+docs/manual/
 *.ttt.bak
