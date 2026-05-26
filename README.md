@@ -1,97 +1,118 @@
-# Multi-Robot Cooperative System — CoppeliaSim + Python
+# Multi-Robot Cooperative Push — CoppeliaSim + Python
 
 ## Overview
-Multi-agent cooperative robotics system using two Pioneer P3DX robots and a
-quadcopter to move a payload to a rally point in a completely unknown environment.
-The only prior knowledge is the rally point position.
+
+Two Pioneer P3DX robots cooperate to push a payload to a rally point.
+The system uses a centralised **force-decomposition planner** that solves
+a 2-variable NNLS problem each tick to assign contact faces and
+coordinate push forces.
 
 ## Agents
+
 | Agent     | Type         | Role |
 |-----------|--------------|------|
-| `/p3dx_1` | Pioneer P3DX | Exploration, pusher 1 |
-| `/p3dx_2` | Pioneer P3DX | Exploration, pusher 2 |
-| `/drone`  | Quadcopter   | Aerial exploration, payload detection, corridor surveillance, communication hub |
+| `/p3dx_1` | Pioneer P3DX | Pusher 1 |
+| `/p3dx_2` | Pioneer P3DX | Pusher 2 |
 
 ## Scene objects
-| Object          | Description |
-|-----------------|-------------|
-| `/payload`      | Object to transport (20kg, 0.5m cube) |
-| `/rally_point`  | Extraction point — only prior known position |
+
+| Object         | Description |
+|----------------|-------------|
+| `/payload`     | Object to transport (20 kg, 0.5 m cube) |
+| `/rally_point` | Extraction point — only position known at mission start |
 
 ## Setup
-1. Create and activate a virtual environment:
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+pip install -U pip
+pip install -e .
+pip install coppeliasim-zmqremoteapi-client Pillow
 ```
-2. Install dependencies:
+
+Run with CoppeliaSim open and scene loaded:
+
 ```powershell
-python -m pip install -U pip
-python -m pip install -e .
-pip install coppeliasim-zmqremoteapi-client numpy Pillow
-```
-3. Run unit tests:
-```powershell
-python -m pytest
-```
-4. Run full system (CoppeliaSim must be open with scene loaded):
-```powershell
-python -m src.main
+python -m simulation_tests.test_planner
 ```
 
 ## Scene geometry
-- Playfield: 5×5m, usable area ~±2.4m in x and y (external walls excluded)
-- `/p3dx_1` start: (-1.75, -1.425), `/p3dx_2` start: (-1.75, 1.85)
-- `/payload` start: (0, 0) — unknown to agents until detected
-- `/rally_point`: (1.5, 0.5) — known from mission start
-- Required push vector: (1.5, 0.5) normalised ≈ (0.949, 0.316)
 
-## Knowledge model
-```
-KNOWN at t=0 (given by mission):
-  - rally_point position  ← sole absolute anchor
+| Object       | Position |
+|--------------|----------|
+| `/p3dx_1`    | (-1.725, -1.475) |
+| `/p3dx_2`    | (-1.750, 1.850) |
+| `/payload`   | (0, 0) — unknown to agents |
+| `/rally_point` | (1.125, 0.225) |
 
-UNKNOWN, must be discovered:
-  - environment dimensions
-  - wall positions
-  - payload position
-  - other robot positions (until drone communication)
-  - obstacles
-
-NEVER ASSUMED:
-  - any position not yet confirmed by sensor
-```
+Playfield: 5×5 m. Verified handles: p3dx_1=15, p3dx_2=99, payload=98, rally=97.
 
 ## Project structure
+
 ```
-src/              → main system code
-  main.py         → main loop, state machine, timing, logs
-  robot.py        → Robot class (handle, motors, sensors, navigation)
-  drone.py        → Drone class (patrol, payload detection, corridor mapping)
-  scene.py        → geometry, vectors, success condition
-  strategy.py     → multi-agent coordination, phase machine
-  grid.py         → shared 2D occupancy map
-tests/            → automated unit tests (pytest, no CoppeliaSim required)
-experiments/      → experimental verification scripts (CoppeliaSim required)
-  logs/           → structured output from each experiment
-  results/        → analysis and conclusions from experiments
-docs/             → technical documentation and design decisions
-  PROJECT_STATUS.md → design decisions, verified data, known issues
+src/
+  planner.py   — ContactPlanner: NNLS force decomposition, 8-direction frames
+  robot.py     — Robot class: sensors, motors, drive_to, get_yaw
+  scene.py     — geometry: dist2d, push_vector, payload_reached_rally_point
+  grid.py      — shared 2D occupancy map (50×50, 0.1 m/cell)
+
+simulation_tests/
+  test_planner.py    — two-robot cooperative push (ACTIVE development)
+  test_single_push.py — single-robot baseline (v7, reference)
+  test_sensor_360.py  — sensor position formula verification (PASS)
+  test_handle_mapping.py — object handle confirmation (PASS)
+
+docs/
+  PROJECT_STATUS.md  — architecture decisions, results, pending work
 ```
 
-## System phases
-| Phase      | Description | Exit condition |
-|------------|-------------|----------------|
-| EXPLORING  | Wall following builds shared occupancy map | Payload detected by any agent |
-| CONVERGING | Agents navigate to push positions | Both confirmed by frontal sensors |
-| PUSHING    | Both robots push with sensor-confirmed contact | Payload reaches rally point |
-| SUCCESS    | Mission complete | — |
+## Planner architecture
 
-## Communication architecture
-- **Regular channel — 2Hz heartbeat:** robots → drone (partial map, position, state) / drone → robots (global map, other robot position)
-- **Urgent channel — event-driven:** robot detects unknown object → drone identifies (KNOWN_AGENT / KNOWN_OBJECT / KNOWN_STATIC / UNKNOWN)
-- Drone acts as data hub: elevated position avoids interference, has global view
+```
+Each tick:
+  F_des = normalize(payload → rally)
 
-## Current status
-See `docs/PROJECT_STATUS.md` for verified hardware data, design decisions,
-known issues and pending experiments.
+  For each unordered face pair {k0, k1} from 8 directions (N,S,E,W,NE,NW,SE,SW):
+    For both robot assignments (R1→k0,R2→k1) and (R1→k1,R2→k0):
+      1. Reject if approach separation < 0.52 m  (robot collision prevention)
+      2. Reject if approach is on rally side of payload (wrong direction)
+      3. Solve NNLS: min ||f0*n0 + f1*n1 - F_des||²  s.t. f0,f1 ≥ 0
+      4. Score = residual + progress_penalty + alignment_penalty
+                + balance_penalty + torque_penalty + nav_cost - lock_bonus
+  
+  Select minimum score → assign faces → compute safe waypoints
+  Lock assignment (sticky) until force_scale → 0 or stall reset
+```
+
+Push direction per face: dynamic (approach → payload centre), not fixed cardinal.
+
+## Verified results
+
+| Test | Steps | Stall resets | Notes |
+|------|-------|-------------|-------|
+| Single robot (v7) | 826 | 0 | Baseline reference |
+| Two robots, cardinal N+E | 4987 | 0 | First cooperative success |
+| Two robots, 8-dir NE+SE | **1466** | 0 | **Current best** |
+
+Force balance NE+SE: f=(0.83, 0.55), ratio=0.50 at t=0 → degrades to 0.17 as
+payload approaches rally (geometric: SE contribution decreases along NE trajectory).
+No S-survival bias: approach-on-rally-side guardrail filters it.
+Both robots now receive their own d3/d4 sensor observations (centering correction active).
+
+## Known limitations
+
+- **Basis degeneracy**: with fixed 8-direction frames, NNLS balance degrades
+  as payload moves and angles shift. Rally-frame basis (dynamic ±45° from
+  payload→rally vector) would give f0≈f1 throughout. Not yet implemented.
+- **Single test scenario**: all results are for rally at (1.125, 0.225).
+  Different rally positions not yet benchmarked.
+- **No environment exploration**: payload and environment are known via
+  `getObjectPosition` GT. The exploration/detection phase from `src/main.py`
+  is not integrated with the planner.
+
+## Next steps
+
+1. Rally-frame dynamic basis: compute approach directions as ±45° from F_des
+2. Multi-scenario benchmarking: rally N, S, NW
+3. Integration with `src/main.py` exploration pipeline

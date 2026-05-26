@@ -1,53 +1,74 @@
 # Simulation Tests
 
 Verification scripts that require CoppeliaSim running with the scene loaded.
-These are not automated unit tests — they require the simulated hardware
-and produce logs and result files for analysis.
+Not automated unit tests — require simulated hardware.
 
 ## How to run
+
 ```powershell
 # From project root, with CoppeliaSim open and scene loaded
-python -m simulation_tests.test_sensor_360
+python -m simulation_tests.test_planner
+python -m simulation_tests.test_single_push
 ```
-
-Logs are saved to `simulation_tests/logs/` with a timestamp.
-Results and conclusions are saved to `simulation_tests/results/`.
 
 ## Status
 
 ### Completed
+
 | Script | Date | Result |
 |--------|------|--------|
-| `test_drone_sensor.py` | 2026-05 | No sensors confirmed |
-| `test_exploring.py` | 2026-05 | Outer waypoints OK, inner waypoints oscillate |
-| `test_wall_follower.py` | 2026-05 | PID works but requires wall in range at start |
+| `test_sensor_360.py` | 2026-05 | PASS — position formula verified, avg error 0.025 m |
+| `test_handle_mapping.py` | 2026-05 | PASS — all object handles confirmed |
+| `test_single_push.py` (v7) | 2026-05 | PASS — 826 steps, 0.3293 m, deterministic |
+| `test_planner.py` (v3) | 2026-05 | PASS — 1466 steps, NE+SE faces, 0 stall resets |
+| `test_exploring.py` | 2026-05 | Partial — outer waypoints OK, inner waypoints oscillate |
+| `test_wall_follower.py` | 2026-05 | Partial — PID OK, requires wall in range at start |
 
-### Blocking
-| Script | Status | Purpose |
-|--------|--------|---------|
-| `test_sensor_360.py` | **PENDING — metric fix needed** | Verify position calculation formula with corrected metric (`distance_to_nearest_plane`) |
+### Active development
 
-### Priority 1 — Sensor verification
-| Script | Status | Purpose |
-|--------|--------|---------|
-| `test_handle_mapping.py` | PENDING | Verify all object handles with new nomenclature |
-| `test_sensor_identification.py` | PENDING | Verify `readProximitySensor` returns detected object handle |
+| Script | Purpose |
+|--------|---------|
+| `test_planner.py` | Two-robot cooperative push using ContactPlanner |
 
-### Priority 2 — Movement verification
-| Script | Status | Purpose |
-|--------|--------|---------|
-| `test_wall_approach.py` | PENDING | Robot advances until wall detected from open space |
-| `test_wall_following_pid.py` | PENDING | Full wall following 60s with PID log |
-| `test_motor_response.py` | PENDING | Real robot velocity vs `setJointTargetVelocity` value |
+### Pending
 
-### Priority 3 — Push verification
-| Script | Status | Purpose |
-|--------|--------|---------|
-| `test_push_single.py` | PENDING | Single robot pushes payload |
-| `test_push_alignment.py` | PENDING | Two robots, different offsets — optimal push geometry |
+| Script | Purpose |
+|--------|---------|
+| `test_wall_approach.py` | Robot advances until payload detected from open space |
+| `test_push_alignment.py` | Optimal approach geometry for two robots |
 
-### Priority 4 — Multi-agent
-| Script | Status | Purpose |
-|--------|--------|---------|
-| `test_deadlock_prevention.py` | PENDING | Two robots face to face — priority hierarchy |
-| `test_exploring_coordination.py` | PENDING | Coordinated exploration with shared map |
+### Superseded
+
+| Script | Replaced by | Notes |
+|--------|-------------|-------|
+| `test_two_robots.py` | `test_planner.py` | FSM approach, no force decomposition |
+
+## Key results summary
+
+### Single robot (v7) — `test_single_push.py`
+Best reference for single-agent performance.
+- **826 steps**, 0 repositions, final dist 0.3293 m
+- Deterministic across multiple runs from same start position (-1.725, -1.475)
+- Architecture: GT navigation to push_target + sensor centering in PUSH phase
+
+### Two robots — `test_planner.py` evolution
+
+```
+Version        Steps   Ratio   Notes
+N+E cardinal   4987    0.33    First cooperative success; R1 dominates
+NE+SE 8-dir    1466    0.50    Current best; 3.4× faster than N+E
+```
+
+**NE+SE assignment** for rally at (1.125, 0.225):
+- R1 → NE: approach (-0.346, -0.346), push (+0.707, +0.707), f≈0.83
+- R2 → SE: approach (-0.346, +0.346), push (+0.707, -0.707), f≈0.55
+- Approach separation: 0.692 m (no collision)
+- Force residual: 0 (perfect F_des reconstruction)
+
+## Architecture note
+
+`test_planner.py` v3 uses:
+- `src/planner.py` — ContactPlanner with 8-direction frames, NNLS, sticky locks
+- `src/robot.py` — Robot class (sensors, motors, drive_to)
+- Unified sensor routing: each robot reads its own d3/d4 independently
+- EMA stall detection (active only when both robots in PUSH)

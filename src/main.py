@@ -1,23 +1,23 @@
 """
 main.py
-Entry point for the multi-robot cooperative system.
+Punto de entrada del sistema multi-robot cooperativo.
 
-Usage:
+Uso:
     python -m src.main
 
-Project structure:
+Estructura del proyecto:
     src/
-        main.py      — main loop, logs, timing
-        robot.py     — Robot class with configured sensors
-        drone.py     — Drone class with patrol and corridor mapping
-        scene.py     — geometry, vectors, success condition
-        strategy.py  — state machine with occupancy map
-        grid.py      — shared 2D occupancy map
+        main.py      — bucle principal, logs, timing
+        planner.py   — ContactPlanner: NNLS force decomposition, 8-direction frames
+        robot.py     — clase Robot (Pioneer P3DX): sensores, motores, navegación
+        team.py      — Team: registro de agentes, mapa compartido
+        strategy.py  — máquina de estados de misión (exploración → empuje)
+        scene.py     — geometría, vectores de empuje, condición de éxito
+        grid.py      — mapa de ocupación 2D compartido
 
-Agents:
-    /drone   — Quadcopter: patrols, detects payload, maps corridor to rally point
-    /p3dx_1  — Pioneer P3DX: exploration, pusher 1
-    /p3dx_2  — Pioneer P3DX: exploration, pusher 2
+Agentes:
+    /p3dx_1  — Pioneer P3DX: pusher 1
+    /p3dx_2  — Pioneer P3DX: pusher 2
 """
 
 import time
@@ -25,14 +25,13 @@ import time
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 
 from .robot    import Robot
-from .drone    import Drone
+from .team     import Team
 from .scene    import get_position, payload_reached_rally_point, dist2d
 from .strategy import Strategy, Phase
 
 
-STEP_INTERVAL = 0.05
-MAX_DURATION  = 300.0
-LOG_EVERY     = 10
+MAX_STEPS = 6000
+LOG_EVERY = 20
 
 
 def main():
@@ -43,56 +42,52 @@ def main():
 
     p3dx_1 = Robot(sim, '/p3dx_1', name='1')
     p3dx_2 = Robot(sim, '/p3dx_2', name='2')
-    drone  = Drone(sim, '/drone')
 
     payload_h     = sim.getObject('/payload')
     rally_point_h = sim.getObject('/rally_point')
 
-    strategy = Strategy(p3dx_1, p3dx_2, drone, payload_h, rally_point_h, sim)
+    team = Team(
+        sim           = sim,
+        agents        = {'p3dx_1': p3dx_1, 'p3dx_2': p3dx_2},
+        rally_point_h = rally_point_h,
+        payload_h     = payload_h,
+    )
+
+    strategy = Strategy(team, sim)
 
     print("Agents initialized:")
     print(f"  P3DX 1     : {p3dx_1.get_position()[:2]}")
     print(f"  P3DX 2     : {p3dx_2.get_position()[:2]}")
-    print(f"  Drone      : {drone.get_position()[:2]}")
     print(f"  Sensors 1  : {len(p3dx_1.sensors)}/16")
     print(f"  Sensors 2  : {len(p3dx_2.sensors)}/16")
     print(f"  Rally point: {get_position(sim, rally_point_h)[:2]}")
-    print(f"  Map        : {strategy.map.rows}x{strategy.map.cols} "
-          f"({strategy.map.resolution}m/cell)\n")
+    print(f"  Map        : {team.map.rows}x{team.map.cols} "
+          f"({team.map.resolution}m/cell)\n")
 
+    sim.setStepping(True)
     sim.startSimulation()
-    print("Simulation started.\n")
+    print("Simulation started (synchronous stepping).\n")
 
-    t_start      = time.time()
-    t_detection  = None
-    cycle        = 0
-    corridor_set = False
+    t_start     = time.time()
+    t_detection = None
+    step        = 0
 
     try:
         while True:
-            t_cycle = time.time()
+            sim.step()
 
             phase = strategy.step()
 
-            # First detection
             if t_detection is None and strategy.payload_known_pos is not None:
                 t_detection = time.time() - t_start
-                print(f"\n>>> PAYLOAD DETECTED at t={t_detection:.2f}s")
+                print(f"\n>>> PAYLOAD DETECTED at step={step} t={t_detection:.2f}s")
                 print(f"    Position: {strategy.payload_known_pos[:2]}\n")
 
-            # Set drone corridor once payload is known
-            if (not corridor_set and
-                    strategy.payload_known_pos is not None):
-                rally_pos = get_position(sim, rally_point_h)
-                drone.set_corridor(strategy.payload_known_pos, rally_pos)
-                corridor_set = True
-
-            if cycle % LOG_EVERY == 0:
+            if step % LOG_EVERY == 0:
                 elapsed   = time.time() - t_start
                 rally_pos = get_position(sim, rally_point_h)
-                print(f"t={elapsed:6.1f}s  "
-                      f"{strategy.status(rally_pos)}  "
-                      f"| {drone.status()}")
+                print(f"step={step:5d} t={elapsed:6.1f}s  "
+                      f"{strategy.status(rally_pos)}")
 
             if phase == Phase.SUCCESS:
                 elapsed     = time.time() - t_start
@@ -100,6 +95,7 @@ def main():
                 rally_pos   = get_position(sim, rally_point_h)
                 print(f"\n{'='*68}")
                 print(f"  MISSION COMPLETE")
+                print(f"  Total steps:      {step}")
                 print(f"  Total time:       {elapsed:.2f} s")
                 if t_detection:
                     print(f"  Detection time:   {t_detection:.2f} s")
@@ -107,20 +103,16 @@ def main():
                 print(f"  Final distance:   {dist2d(payload_pos, rally_pos):.4f} m")
                 print(f"  Payload position: ({payload_pos[0]:.3f},{payload_pos[1]:.3f})")
                 print(f"  Rally point:      ({rally_pos[0]:.3f},{rally_pos[1]:.3f})")
-                print(f"  {strategy.map.stats()}")
+                print(f"  {team.map.stats()}")
                 print(f"{'='*68}\n")
                 break
 
-            elapsed = time.time() - t_start
-            if elapsed > MAX_DURATION:
-                print(f"\nTIMEOUT ({MAX_DURATION}s).")
+            step += 1
+            if step >= MAX_STEPS:
+                print(f"\nTIMEOUT ({MAX_STEPS} steps).")
                 p3dx_1.stop()
                 p3dx_2.stop()
                 break
-
-            sleep = max(0.0, STEP_INTERVAL - (time.time() - t_cycle))
-            time.sleep(sleep)
-            cycle += 1
 
     except KeyboardInterrupt:
         print("\nInterrupted.")
